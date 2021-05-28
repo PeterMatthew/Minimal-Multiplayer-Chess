@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>chess</title>
+	<link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
+	<style type="text/css">
+		*{
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+		html{
+			height: 100%;
+			width: 100%;
+		}
+		body{
+			height: 100%;
+			width: 100%;
+		}
+		.container{
+			background-color: #F3F4F6;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 100%;
+			height: 100%;
+		}
+		.welcome{
+			display: flex;
+			background-color: #fff;
+			padding: 16px;
+			border: 1px solid #9CA3AF;
+		}
+		.board{
+			display: none;
+			background-color: #fff;
+			padding: 16px;
+			border: 1px solid #9CA3AF;
+		}
+		.info{
+			margin-top: 16px;
+			width: 100%;
+			display: flex;
+			justify-content: space-between;
+		}
+		.info label{
+			color: #6B7280;
+		}
+	</style>
+	<script type="text/javascript" src="js/jquery-3.6.0.min.js"></script>
+	<script type="text/javascript" src="js/chess.js"></script>
+	<script type="text/javascript" src="js/chessboard-1.0.0.min.js"></script>
+</head>
+<body>
+	<div class="container">
+	<div class="welcome" id="welcome">
+		<input placeholder="lobby code" type="text" name="lobby" id="lobby">
+		<button class="enter-button" id="button" onclick="enter()">Entrar</button>
+		<span id="error"></span>
+	</div>
+
+	<div class="board" id="board">
+		<div id="myBoard" style="width: 400px"></div>
+		<div class="info">
+			<div>
+				<label>Status:</label>
+				<div id="status"></div>
+			</div>
+			<div>
+				<label>Your lobby code:</label>
+				<div id="lobby_code"></div>
+			</div>
+		</div>
+	</div>
+</div>
+	<script type="text/javascript">
+		var lobby = document.getElementById("lobby");
+		var button = document.getElementById("button");
+		var error = document.getElementById("error");
+		var color;
+		var lobby_id;
+
+		function enter () {
+			if (lobby.value != "") {
+				$.ajax({
+					url: '/enter',
+					type: 'post',
+					success: function (data) {
+						if (data.cod === "erro") {
+							error.innerHTML = "sala cheia"
+						}else {
+							if (data.color === "b")color = 'black';
+							if (data.color === "w")color = 'white';
+							lobby_id = lobby.value;
+							startGame();
+						}
+					},
+					data: JSON.stringify(lobby.value)
+				});
+			}
+		}
+	</script>
+
+	<script type="text/javascript">
+		var board = null
+		var game = new Chess()
+		var $status = $('#status')
+		var $board = $('#board')
+		var $welcome = $('#welcome')
+		var $lobby_code = $('#lobby_code')
+
+		function onDragStart (source, piece, position, orientation) {
+			// do not pick up pieces if the game is over
+			if (game.game_over()) return false
+
+			// only pick up pieces for the side to move
+			if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+				(game.turn() === 'b' && piece.search(/^w/) !== -1) ||
+				(game.turn() === 'w' && color == 'black') ||
+				(game.turn() === 'b' && color == 'white')) {
+				return false
+			}
+		}
+
+		function onDrop (source, target) {
+			// see if the move is legal
+			
+			var move = game.move({
+				from: source,
+				to: target,
+				promotion: 'q' // NOTE: always promote to a queen for example simplicity
+			})
+			
+			// illegal move
+			if (move === null) return 'snapback';
+			else {
+				console.log(move);
+				console.log(game.fen());
+
+				var obj_move = {
+					"move": move,
+					"fen": game.fen(),
+					"lobby": lobby_id
+				}
+
+				$.ajax({
+					url: '/nextMove',
+					type: 'post',
+					success: function (data) {
+						console.log(data);
+					},
+					data: JSON.stringify(obj_move)
+				});
+			}
+
+			updateStatus()
+		}
+
+		// update the board position after the piece snap
+		// for castling, en passant, pawn promotion
+		function onSnapEnd () {
+			board.position(game.fen())
+		}
+
+		function updateStatus () {
+			var status = ''
+
+			var moveColor = 'White'
+			if (game.turn() === 'b') {
+				moveColor = 'Black'
+			}
+
+			// checkmate?
+			if (game.in_checkmate()) {
+				status = 'Game over, ' + moveColor + ' is in checkmate.'
+			}
+
+			// draw?
+			else if (game.in_draw()) {
+				status = 'Game over, drawn position'
+			}
+
+			// game still on
+			else {
+				status = moveColor + ' to move'
+
+				// check?
+				if (game.in_check()) {
+					status += ', ' + moveColor + ' is in check'
+				}
+			}
+
+			$status.html(status)
+		}
+
+		function startGame() {
+			$welcome.css('display', 'none')
+			$board.css('display', 'block')
+			$lobby_code.html(lobby_id)
+
+			var config = {
+				draggable: true,
+				position: 'start',
+				onDragStart: onDragStart,
+				onDrop: onDrop,
+				onSnapEnd: onSnapEnd,
+				orientation: color
+			}
+
+			board = Chessboard('myBoard', config)
+
+			updateStatus()
+			
+			var interval = window.setInterval(function(){
+
+				obj_refrash = {
+					"color": color,
+					"lobby": lobby_id	
+				}
+
+				$.ajax({
+					url: '/refrash',
+					type: 'post',
+					success: function (data) {
+						console.log(data);
+						if (data.cod === "ok") {
+							game.move(data.move);
+							board.position(game.fen());
+							updateStatus();
+						}
+					},
+					data: JSON.stringify(obj_refrash)
+				});
+			}, 3000);
+		}
+
+	</script>
+</body>
+</html>
